@@ -1,8 +1,9 @@
-# Stage 1
+# Notification System Design
 
-## Notification System API Design
+## Stage 1 — API Design
 
-The notification system should support:
+The notification system supports the following operations:
+
 - Create notification
 - Fetch notifications
 - Fetch unread notifications
@@ -13,159 +14,173 @@ The notification system should support:
 
 ```http
 POST /api/v1/notifications
+```
 
-Request:
-
+**Request:**
+```json
 {
   "studentId": 1042,
   "notificationType": "Placement",
   "message": "AMD hiring started"
 }
+```
 
-Response:
-
+**Response:**
+```json
 {
   "success": true,
   "message": "Notification created"
 }
-Get Notifications
+```
+
+### Get Notifications
+
+```http
 GET /api/v1/notifications/1042
-Mark as Read
+```
+
+### Mark as Read
+
+```http
 PATCH /api/v1/notifications/1/read
-Realtime Notifications
+```
 
-I would use WebSockets with Socket.IO for realtime notification updates because it allows instant notification delivery without repeated API requests.
+### Realtime Notifications
 
-# Stage 2
-Database Choice
+WebSockets with **Socket.IO** will be used for realtime notification updates. This allows instant notification delivery without repeated API polling.
 
-I would use MongoDB because:
+---
 
-flexible schema
-easy to scale
-good for large notification data
-faster development with Node.js
-Notification Schema
+## Stage 2 — Database Design
+
+### Database Choice
+
+**MongoDB** is chosen for the following reasons:
+
+- Flexible schema
+- Easy to scale
+- Well-suited for large notification datasets
+- Faster development with Node.js
+
+### Notification Schema
+
+```json
 {
-  studentId: Number,
-  notificationType: String,
-  message: String,
-  isRead: Boolean,
-  createdAt: Date
+  "studentId": "Number",
+  "notificationType": "String",
+  "message": "String",
+  "isRead": "Boolean",
+  "createdAt": "Date"
 }
-Problems When Data Increases
-Slow queries
-High DB load
-Slow notification fetching
-Solutions
-Indexing
-Pagination
-Redis caching
-Database sharding
-Sample Query
+```
+
+### Problems When Data Increases
+
+- Slow queries
+- High database load
+- Slow notification fetching
+
+### Solutions
+
+- **Indexing** — Speed up frequent queries
+- **Pagination** — Limit results per request
+- **Redis caching** — Reduce repeated DB hits
+- **Database sharding** — Distribute data across nodes
+
+### Sample Query
+
+```js
 db.notifications.find({
   studentId: 1042,
   isRead: false
 })
-Stage 3
+```
 
-Given Query:
+---
 
+## Stage 3 — Query Optimization
+
+### Given Query
+
+```sql
 SELECT * FROM notifications
 WHERE studentId = 1042 AND isRead = false
 ORDER BY createdAt DESC;
+```
 
-The query is correct but may become slow because millions of records can cause full table scans and sorting overhead.
+This query is correct but may become slow at scale due to full table scans and sorting overhead over millions of records.
 
-Improvement
+### Improvement — Add a Composite Index
 
-Create index:
-
+```sql
 CREATE INDEX idx_notification
 ON notifications(studentId, isRead, createdAt DESC);
+```
+> **Note:** Adding indexes on every column is not recommended — it increases storage usage and slows `INSERT`/`UPDATE` operations.
 
-Without index:
+### Placement Notification Query
 
-O(n)
-
-With index:
-
-approximately O(log n)
-
-Adding indexes on every column is not recommended because it increases storage and slows insert/update operations.
-
-Placement Notification Query
+```sql
 SELECT DISTINCT studentId
 FROM notifications
 WHERE notificationType = 'Placement'
 AND createdAt >= NOW() - INTERVAL 7 DAY;
-Stage 4
+```
 
-Fetching notifications on every page load increases database load.
+---
 
-Improvements
-Redis Caching
+## Stage 4 — Performance Improvements
 
-Reduces repeated database queries.
+Fetching notifications on every page load increases database load unnecessarily.
 
-WebSockets
+### Recommended Improvements
 
-Realtime updates without polling.
+ Technique          Benefit                                    
+ **Redis Caching** : Reduces repeated database queries          
+ **WebSockets**    : Realtime updates without polling           
+ **Pagination**    : Loads notifications in smaller batches     
+ **Lazy Loading**  : Loads older notifications only when needed 
 
-Pagination
+These methods improve performance and reduce overall server load.
 
-Loads notifications in smaller batches.
+---
 
-Lazy Loading
+## Stage 5 — Bulk Notification Processing
 
-Load older notifications only when needed.
+### Problems in Existing Implementation
 
-These methods improve performance and reduce server load.
+- Sequential execution is slow
+- No retry mechanism
+- Missing failure handling
+- Difficult to scale for 50,000+ students
+- If email sending fails, some students may not receive notifications
 
-Stage 5
+### Better Approach
 
-Problems in Existing Implementation
-Sequential execution is slow
-No retry mechanism
-Failure handling missing
-Difficult to scale for 50,000 students
-
-If email sending fails, some students may not receive notifications.
-
-Better Approach
-
-Use asynchronous queue-based processing using tools like RabbitMQ or BullMQ.
+Use **asynchronous queue-based processing** with tools like **RabbitMQ** or **BullMQ**.
 
 Separate workers can handle:
+- Email sending
+- Database storage
+- Push notifications
 
-email sending
-database storage
-push notifications
-Improved Pseudocode
+### Improved Pseudocode
+
+```
 function notify_all(student_ids, message):
-
     for student_id in student_ids:
-
         add_job_to_queue({
             student_id,
             message
         })
 
-
 worker_process():
-
     while jobs_available():
-
         job = get_next_job()
-
         try:
             save_to_db(job.student_id, job.message)
-
             send_email(job.student_id, job.message)
-
             push_to_app(job.student_id, job.message)
-
         catch error:
             retry_job(job)
-
-Database save and email sending should be handled separately because email delivery may fail temporarily while notification data still needs to be stored.
+```
